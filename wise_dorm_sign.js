@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 华天 wise 晚寝签到（青龙 / Node 版）—— 部署步骤、参数说明、常见问题见 README_晚寝签到部署.md
+// 晚寝签到（青龙 / Node 版）—— 部署步骤、参数说明、常见问题见 README_晚寝签到部署.md
 
 'use strict';
 
