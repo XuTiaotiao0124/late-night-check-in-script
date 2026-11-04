@@ -677,7 +677,7 @@ async function main() {
   if (!SIGN_URL) {
     const msg =
       '缺少签到链接：请把浏览器地址栏里的签到链接整条填进脚本配置区的 SIGN_URL，' +
-      '或设置环境变量 WQQD_SIGN_URL' +;
+      '或设置环境变量 WQQD_SIGN_URL';
     console.error('❌ ' + msg);
     await sendQywx('❌ 晚寝签到失败（未配置签到链接）', [msg]);
     process.exitCode = 1;
@@ -686,7 +686,7 @@ async function main() {
   if (!PARSED_URL) {
     const msg =
       `签到链接无法解析出 taskId：${SIGN_URL}\n` +
-      '正确格式必须包含 ?taskId=xxxx，' +
+      '正确格式必须包含 ?taskId=xxxx';
     console.error('❌ ' + msg);
     await sendQywx('❌ 晚寝签到失败（签到链接无效）', [msg]);
     process.exitCode = 1;
