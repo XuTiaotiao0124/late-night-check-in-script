@@ -136,7 +136,7 @@ const SETTINGS = {
 | `JITTER` | 坐标随机抖动半径（米），`0` = 每次都提交完全相同的坐标 |
 | `DRY_RUN` | `true` = 只演练：登录、查任务、打印请求体，**不真正提交**；平时 `false` |
 | `FORCE` | `true` = 忽略「今天已签到」跳过逻辑，强制走提交（服务端会回「您今天已完成签到，请勿重复点击！」）；仅测试用，平时 `false` |
-| `RETRY` / `RETRY_WAIT` | 失败重试次数 / 每次重试间隔（秒） |
+| `RETRY` / `RETRY_WAIT` | 失败重试次数 / 每次重试间隔（秒）。**任何错误（接口异常、超时、502/503/504 网关错误等）都会等待 `RETRY_WAIT` 秒后重试，连续 `RETRY` 次（默认 3 次）都失败才判定失败并推送 ❌**。502 只是最常见的错误之一 |
 | `EARLY_WAIT` | 定时任务早于签到开始时间触发时，允许原地等待的最大秒数（`0` = 早到一律跳过） |
 | `QYWX_KEY` | 群机器人 webhook key 或完整地址，留空则不推送 |
 | `NOTIFY` | `false` = 关闭推送（签到照常进行） |
@@ -246,6 +246,8 @@ const SETTINGS = {
 
 `.sh` 版的签到链接填在脚本自己的配置区里（`SIGN_URL=` 那一行，整条粘贴；站点地址与 taskId 都从它解析，同样不再单独配 `BASE` / `TASK_ID`）。没填会直接报错退出。
 
+> `.sh` 版同样带重试：登录、拉任务、查记录、提交各步骤只要遇到错误（接口异常、空响应、502/503/504 网关错误等）都会等待 `WQQD_RETRY_WAIT` 秒后重试，连续 `WQQD_RETRY` 次都失败才判失败。两个都走环境变量，默认 `WQQD_RETRY=3`、`WQQD_RETRY_WAIT=20`。
+
 ```sh
 1 21 * * *  WQQD_ACCOUNT1=888888888 WQQD_PASSWORD1='xxxxxxxx' /bin/sh /root/wise_dorm_sign.sh >> /tmp/wise_sign.log 2>&1
 2 22 * * *  WQQD_ACCOUNT1=888888888 WQQD_PASSWORD1='xxxxxxxx' /bin/sh /root/wise_dorm_sign.sh >> /tmp/wise_sign.log 2>&1
@@ -286,7 +288,7 @@ uci set system.ntp.timezone='CST-8'; uci commit system; /etc/init.d/system resta
 | `JITTER` | `3` | `WQQD_JITTER` | 坐标随机抖动半径（米），`0` 关闭 |
 | `DRY_RUN` | `false` | `WQQD_DRY_RUN` | `true`/`1` = 只演练：登录、查任务、打印请求体，**不真正提交** |
 | `FORCE` | `false` | `WQQD_FORCE` | `true`/`1` = 忽略「今天已签到」跳过逻辑，强制走提交（仅测试用） |
-| `RETRY` | `3` | `WQQD_RETRY` | 失败重试次数 |
+| `RETRY` | `3` | `WQQD_RETRY` | 失败重试次数（任何错误都重试，连续这么多次都失败才判失败） |
 | `RETRY_WAIT` | `30` | `WQQD_RETRY_WAIT` | 每次重试间隔（秒） |
 | `EARLY_WAIT` | `120` | `WQQD_EARLY_WAIT` | 定时任务早于签到开始时间触发时，允许原地等待的最大秒数（`0` = 早到一律跳过） |
 | `QYWX_KEY` | `''` | `WQQD_QYWX_KEY` | 群机器人 webhook key 或完整地址，留空则不推送 |
@@ -393,7 +395,7 @@ uci set system.ntp.timezone='CST-8'; uci commit system; /etc/init.d/system resta
 - **返回「未到签到时间！」**：服务端按**它自己的时间**校验，如果提前手动跑就会这样；等 21:00 后自然正常。
 - **企业微信 `errcode 93000`**：webhook 地址/key 不对，去群里重新复制机器人地址。
 - **企业微信 `errcode 45009`**：该机器人发消息太频繁，等一会或减少推送（`WQQD_NOTIFY_SKIP=0`）。
-- **站点偶发 502**：学校网关临时故障，脚本会重试；还有 22:02 那条兜底。
+- **站点偶发 502 或其它接口错误**：学校网关临时故障等，脚本会等待 `RETRY_WAIT`（默认 30 秒）后自动重试，登录、拉任务、查记录、提交各步骤都适用，连续 3 次（`RETRY`）都失败才判失败并推送 ❌；还有 22:02 那条兜底。
 
 ---
 

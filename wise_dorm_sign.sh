@@ -10,7 +10,8 @@ LAT="${WQQD_LAT:-${WISE_LAT:-88.888888888888888}}"               # 纬度
 LNG="${WQQD_LNG:-${WISE_LNG:-88.888888888888888}}"               # 经度
 ACC="${WQQD_ACC:-${WISE_ACC:-23.7}}"                             # 定位精度（米）
 DRY_RUN="${WQQD_DRY_RUN:-${DRY_RUN:-0}}"                         # 演练模式（1=只演练）
-RETRY="${WQQD_RETRY:-${WISE_RETRY:-3}}"                          # 失败重试次数
+RETRY="${WQQD_RETRY:-${WISE_RETRY:-3}}"                          # 失败重试次数（任何错误都重试，连续这么多次都失败才判失败）
+RETRY_WAIT="${WQQD_RETRY_WAIT:-${WISE_RETRY_WAIT:-20}}"          # 每次重试间隔（秒）
 NOW_OVERRIDE="${WQQD_NOW:-${WISE_NOW:-}}"                        # 注入时间（测试用）
 ACCOUNT="${WQQD_ACCOUNT1:-${WISE_ACCOUNT:?请设置 WQQD_ACCOUNT1（学号）}}"        # 账号
 PASSWORD="${WQQD_PASSWORD1:-${WISE_PASSWORD:?请设置 WQQD_PASSWORD1（密码）}}"    # 密码
@@ -143,18 +144,58 @@ http() {
 AUTH_BASIC="Basic $(b64s "$CLIENT_ID:$CLIENT_SECRET")"
 
 # ---------------------------------------------------------------------------
+# 带重试的请求：任何「失败」都重试（常见是 502/503/504 网关错误，返回 HTML 错误页
+# 或空响应）。判定失败的情形：响应为空、明显不是 JSON（没有 { 或 }），或含 HTTP 5xx。
+# 每次失败等 RETRY_WAIT 秒，连续 RETRY 次都失败才放弃。成功时把响应正文打印到 stdout。
+# 用法：http_retry <METHOD> <path+query> <token|-> [json-body]
+# 注意：需要判断响应内容的业务校验（如 access_token、code==200）由调用方在拿到结果后做。
+# ---------------------------------------------------------------------------
+is_bad_resp() {
+  # $1 = 响应正文；0=失败(可重试)，1=正常
+  [ -z "$1" ] && return 0
+  case "$1" in
+    *'"code":401'*|*鉴权失败*|*登录过期*) return 1;;   # 鉴权类错误不重试，交给调用方处理
+  esac
+  case "$1" in
+    *'{'*'}'*) : ;;          # 看起来像 JSON，继续往下判断是否 5xx
+    *) return 0;;            # 没有 JSON 结构 → HTML 错误页/空壳，判为失败可重试
+  esac
+  case "$1" in
+    *'"status":502'*|*'"status":503'*|*'"status":504'*|*'HTTP 502'*|*'HTTP 503'*|*'HTTP 504'*) return 0;;
+  esac
+  return 1
+}
+
+http_retry() {
+  _hr_i=1
+  while [ "$_hr_i" -le "$RETRY" ]; do
+    _hr_res=$(http "$1" "$2" "$3" "$4")
+    if ! is_bad_resp "$_hr_res"; then
+      printf '%s' "$_hr_res"
+      return 0
+    fi
+    echo "⚠️ 第 $_hr_i/$RETRY 次请求失败（常见为 502 等网关错误）：$(printf '%s' "$_hr_res" | head -c 160)" >&2
+    _hr_i=$(( _hr_i + 1 ))
+    [ "$_hr_i" -le "$RETRY" ] && { echo "等待 ${RETRY_WAIT}s 后重试…" >&2; sleep "$RETRY_WAIT"; }
+  done
+  printf '%s' "$_hr_res"
+  return 1
+}
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 echo "[$DATE $TIME $WEEK] 登录中…(curl=$USE_CURL)"
-LOGIN_JSON=$(http POST "/api/flySource-auth/oauth/token?tenantId=${TENANT_ID}&username=${ACCOUNT}&password=$(md5s "$PASSWORD")&type=account&grant_type=password&scope=all" "-")
+LOGIN_JSON=$(http_retry POST "/api/flySource-auth/oauth/token?tenantId=${TENANT_ID}&username=${ACCOUNT}&password=$(md5s "$PASSWORD")&type=account&grant_type=password&scope=all" "-")
 TOKEN=$(jget "$LOGIN_JSON" access_token)
 if [ -z "$TOKEN" ]; then
-  echo "❌ 登录失败：$(printf '%s' "$LOGIN_JSON" | head -c 300)"
+  echo "❌ 登录失败（已重试 $RETRY 次）：$(printf '%s' "$LOGIN_JSON" | head -c 300)"
   exit 1
 fi
 echo "登录成功"
 
-TASK_JSON=$(http GET "/api/flySource-yxgl/dormSignTask/getTaskByIdForApp?taskId=${TASK_ID}" "$TOKEN")
+TASK_JSON=$(http_retry GET "/api/flySource-yxgl/dormSignTask/getTaskByIdForApp?taskId=${TASK_ID}" "$TOKEN")
 START_T=$(jget "$TASK_JSON" signStartTime); START_T=${START_T:-21:00:00}
 END_T=$(jget "$TASK_JSON" signEndTime);   END_T=${END_T:-23:00:00}
 TASK_TYPE=$(jget "$TASK_JSON" taskType);  TASK_TYPE=${TASK_TYPE:-1}
@@ -190,7 +231,7 @@ if [ "$(tsec "$TIME")" -gt "$(tsec "$END_T")" ]; then
 fi
 
 # 已签检查
-REC_JSON=$(http GET "/api/flySource-yxgl/dormSignRecord/getOne?taskId=${TASK_ID}&signDate=${DATE}&taskType=${TASK_TYPE}" "$TOKEN")
+REC_JSON=$(http_retry GET "/api/flySource-yxgl/dormSignRecord/getOne?taskId=${TASK_ID}&signDate=${DATE}&taskType=${TASK_TYPE}" "$TOKEN")
 STATUS=$(jgetnum "$REC_JSON" signStatus)
 case "$STATUS" in
   0|1|2|4|5|6)
@@ -219,14 +260,14 @@ while [ "$i" -le "$RETRY" ]; do
     *'"code":200'*)
       echo "✅ 签到成功"
       # 回查确认
-      CHK=$(http GET "/api/flySource-yxgl/dormSignRecord/getOne?taskId=${TASK_ID}&signDate=${DATE}&taskType=${TASK_TYPE}" "$TOKEN")
+      CHK=$(http_retry GET "/api/flySource-yxgl/dormSignRecord/getOne?taskId=${TASK_ID}&signDate=${DATE}&taskType=${TASK_TYPE}" "$TOKEN")
       echo "回查：$(printf '%s' "$CHK" | head -c 300)"
       exit 0;;
     *'已完成签到'*)
       echo "今天已签到（服务端提示重复），视为成功"; exit 0;;
   esac
   i=$(( i + 1 ))
-  [ "$i" -le "$RETRY" ] && { echo "稍后重试…"; sleep 20; }
+  [ "$i" -le "$RETRY" ] && { echo "等待 ${RETRY_WAIT}s 后重试…"; sleep "$RETRY_WAIT"; }
 done
 echo "❌ 签到失败（已重试 $RETRY 次）"
 exit 1

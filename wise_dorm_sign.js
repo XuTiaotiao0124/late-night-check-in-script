@@ -15,7 +15,7 @@ const SETTINGS = {
   JITTER: 3,                       // 坐标抖动半径（米）
   DRY_RUN: false,                  // 演练模式
   FORCE: false,                    // 强制提交
-  RETRY: 3,                        // 失败重试次数
+  RETRY: 3,                        // 失败重试次数（任何错误都重试；连续这么多次都失败才通知）
   RETRY_WAIT: 30,                  // 重试间隔（秒）
   EARLY_WAIT: 120,                 // 早到等待（秒）
   QYWX_KEY: '',                    // 企业微信通知
@@ -279,11 +279,23 @@ function request(pathWithQuery, { method = 'GET', token, body } = {}) {
         res.setEncoding('utf8');
         res.on('data', (chunk) => (raw += chunk));
         res.on('end', () => {
+          // 网关 502/503/504（常见为 HTML 错误页）单独标记，交给上层按「502 退避重试」处理
+          if (res.statusCode === 502 || res.statusCode === 503 || res.statusCode === 504) {
+            const err = new Error(`网关异常 [HTTP ${res.statusCode}] ${raw.slice(0, 200)}`);
+            err.gateway = true;
+            err.statusCode = res.statusCode;
+            return reject(err);
+          }
           let json;
           try {
             json = JSON.parse(raw);
           } catch (e) {
-            return reject(new Error(`非 JSON 响应 [HTTP ${res.statusCode}] ${raw.slice(0, 200)}`));
+            const err = new Error(`非 JSON 响应 [HTTP ${res.statusCode}] ${raw.slice(0, 200)}`);
+            if (res.statusCode >= 500) {
+              err.gateway = true;
+              err.statusCode = res.statusCode;
+            }
+            return reject(err);
           }
           if (json.code === 401) {
             return reject(new Error('鉴权失败/登录过期：' + (json.msg || raw.slice(0, 200))));
@@ -586,14 +598,18 @@ async function runAccount(account) {
       return { ok: true, result, tries: i };
     } catch (e) {
       lastErr = e;
-      console.error(`${account.id} 第 ${i} 次失败：${e && e.message ? e.message : e}`);
+      const isGateway = !!(e && e.gateway);
+      const detail = isGateway ? `（网关 ${e.statusCode || 502}，常见于 502）` : '';
+      console.error(`${account.id} 第 ${i}/${CONFIG.retry} 次失败${detail}：${e && e.message ? e.message : e}`);
       if (i < CONFIG.retry) {
         console.log(`${CONFIG.retryWait}s 后重试…`);
         await sleep(CONFIG.retryWait * 1000);
       }
     }
   }
-  return { ok: false, error: lastErr && lastErr.message ? lastErr.message : String(lastErr), tries: CONFIG.retry };
+  const reason = lastErr && lastErr.message ? lastErr.message : String(lastErr);
+  console.error(`${account.id} 连续 ${CONFIG.retry} 次均失败，放弃`);
+  return { ok: false, error: reason, tries: CONFIG.retry };
 }
 
 async function notifySummary(runs) {
