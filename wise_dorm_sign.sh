@@ -40,7 +40,8 @@ else
   CLIENT_SECRET='DA788asdUDjnasd_flysource_dsdadDAIUiuwqe'
 fi
 TENANT_ID="000000"
-UA="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+# 服务端按 UA 白名单，只放行钉钉内置浏览器；普通浏览器 UA 会被 nginx 302 到官网首页
+UA="${WQQD_UA:-Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 AliApp(DingTalk/6.5.41) Language/zh-Hans-CN}"
 
 # ---- 基础工具函数 ----
 

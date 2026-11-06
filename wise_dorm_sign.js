@@ -22,6 +22,7 @@ const SETTINGS = {
   NOTIFY: true,                    // 推送开关
   NOTIFY_SKIP: false,              // 跳过也推送
   NOTIFY_ALREADY: false,           // 已签到也推送
+  USE_DINGTALK_UA: true,           // 用钉钉 UA（服务端只放行钉钉内置浏览器；关闭会 302 到官网）
 };
 // 账号走环境变量：WQQD_ACCOUNT1 / WQQD_PASSWORD1（多账号接着写 2、3……）
 // ============================================================================
@@ -178,9 +179,18 @@ const CLIENT_ID = 'flysource_wise_app'; // OAuth 客户端 id（官方前端公�
 const CLIENT_SECRET = pick('WQQD_CLIENT_SECRET', 'WISE_CLIENT_SECRET') || 'DA788asdUDjnasd_flysource_dsdadDAIUiuwqe'; // OAuth 客户端密钥
 const TENANT_ID = '000000'; // 租户 id
 
-const UA = // User-Agent（服务端要求必须带）
+// User-Agent：服务端按 UA 做白名单，只放行钉钉内置浏览器的 UA；
+// 用普通浏览器 UA 会被 nginx 302 到官网首页（表现为「非 JSON 响应 [HTTP 302]」）。
+// 由配置区 USE_DINGTALK_UA 控制（也可用环境变量 WQQD_USE_DINGTALK_UA 覆盖），
+// 还可用 WQQD_UA 直接指定任意 UA。
+const UA_CHROME =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const UA_DINGTALK =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 ' +
+  '(KHTML, like Gecko) Mobile/15E148 AliApp(DingTalk/6.5.41) Language/zh-Hans-CN';
+const USE_DINGTALK_UA = cfgBool(['WQQD_USE_DINGTALK_UA', 'WISE_USE_DINGTALK_UA'], SETTINGS.USE_DINGTALK_UA);
+const UA = pick('WQQD_UA', 'WISE_UA') || (USE_DINGTALK_UA ? UA_DINGTALK : UA_CHROME);
 
 const PATH = { // 接口路径
   token: '/api/flySource-auth/oauth/token',
