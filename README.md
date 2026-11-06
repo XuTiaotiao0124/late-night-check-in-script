@@ -17,7 +17,7 @@
 「订阅管理」→「新建订阅」，在名称或链接框里粘贴下面这段（换成你自己的仓库地址）：
 
 ```
-ql repo https://gitee.com/xxxxxxxx/late-night-check-in-script.git wise_dorm_sign.js "" "" ""
+ql repo https://gitee.com/xutiaotiao0124/late-night-check-in-script wise_dorm_sign.js "" "" ""
 ```
 
 青龙会自动解析填好各字段。
